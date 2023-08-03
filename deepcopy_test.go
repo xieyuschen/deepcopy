@@ -3,12 +3,68 @@ package deepcopy
 import (
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 	"unsafe"
-
+	
 	"github.com/stretchr/testify/assert"
 )
+
+type ref struct {
+	Pointer *ref
+}
+
+func TestCircularReference(t *testing.T) {
+	testCases := map[string]struct {
+		fn func() error
+	}{
+		"pointer circular reference": {fn: func() error {
+			var s ref
+			s.Pointer = &s
+			_, err := Copy(s)
+			return err
+		}},
+		"pointer circular indirect": {fn: func() error {
+			type pointerCycleIndirect struct {
+				Ptrs []interface{}
+			}
+			val := &pointerCycleIndirect{}
+			val.Ptrs = []interface{}{val}
+			_, err := Copy(val)
+			return err
+		}},
+		"recursive slice": {fn: func() error {
+			type RecursiveSlice []RecursiveSlice
+			recursiveSliceCycle := []RecursiveSlice{nil}
+			recursiveSliceCycle[0] = recursiveSliceCycle
+			_, err := Copy(recursiveSliceCycle)
+			return err
+		}},
+		"circular slice": {fn: func() error {
+			sliceCycle := []interface{}{nil}
+			sliceCycle[0] = sliceCycle
+			_, err := Copy(sliceCycle)
+			return err
+		}},
+		"circular map": {fn: func() error {
+			mapCycle := make(map[string]interface{})
+			mapCycle["x"] = mapCycle
+			_, err := Copy(mapCycle)
+			return err
+		}},
+	}
+	
+	for key, tt := range testCases {
+		t.Run(key, func(t *testing.T) {
+			err := tt.fn()
+			if err == nil || !strings.Contains(err.Error(), "encountered a circular reference via") {
+				t.Log(err)
+				t.Error("fail to handle circular reference")
+			}
+		})
+	}
+}
 
 func TestArray(t *testing.T) {
 	verifyCases := map[string]struct {
@@ -21,7 +77,7 @@ func TestArray(t *testing.T) {
 						"1": 1,
 					},
 				}
-				copied := Copy(&origin)
+				copied := first(Copy(&origin))
 				assert.NotSame(t, origin, copied)
 				assert.NotSame(t, origin[0], copied.(*[1]map[string]int)[0])
 				origin[0]["1"] = 999
@@ -37,7 +93,7 @@ func TestArray(t *testing.T) {
 						"1": 1,
 					},
 				}
-				copied := Copy(&origin)
+				copied := first(Copy(&origin))
 				assert.NotSame(t, origin, copied)
 				assert.NotSame(t, origin[0], copied.(*[1]*map[string]int)[0])
 				(*origin[0])["1"] = 999
@@ -52,7 +108,7 @@ func TestArray(t *testing.T) {
 					return &i
 				}
 				arrayOfInt := [3]*int{intp(1), intp(2)}
-				copied := Copy(&arrayOfInt)
+				copied := first(Copy(&arrayOfInt))
 				assert.NotSame(t, &arrayOfInt, copied)
 				assert.NotSame(t, arrayOfInt[0], copied.(*[3]*int)[0])
 				arrayOfInt[0] = intp(999)
@@ -64,7 +120,7 @@ func TestArray(t *testing.T) {
 		"array of int": {
 			modifyAndVerify: func(t *testing.T) {
 				arrayOfInt := [3]int{1, 2}
-				copied := Copy(&arrayOfInt)
+				copied := first(Copy(&arrayOfInt))
 				assert.NotSame(t, &arrayOfInt, copied)
 				assert.NotSame(t, &arrayOfInt[0], copied.(*[3]int)[0])
 				arrayOfInt[0] = 999
@@ -76,7 +132,7 @@ func TestArray(t *testing.T) {
 		"array of slice": {
 			modifyAndVerify: func(t *testing.T) {
 				arraySlice := [3][]int{{1, 2}}
-				copied := Copy(&arraySlice)
+				copied := first(Copy(&arraySlice))
 				assert.NotSame(t, &arraySlice, copied)
 				assert.NotSame(t, &arraySlice[0], copied.(*[3][]int)[0])
 				assert.NotSame(t, &arraySlice[0][0], copied.(*[3][]int)[0][0])
@@ -89,7 +145,7 @@ func TestArray(t *testing.T) {
 		"array of *slice": {
 			modifyAndVerify: func(t *testing.T) {
 				PointerSlice := [3]*[]int{{1, 2}}
-				copied := Copy(&PointerSlice)
+				copied := first(Copy(&PointerSlice))
 				assert.NotSame(t, &PointerSlice, copied)
 				assert.NotSame(t, PointerSlice[0], copied.(*[3]*[]int)[0])
 				assert.NotSame(t, &(*PointerSlice[0])[0], &(*copied.(*[3]*[]int)[0])[0])
@@ -105,7 +161,7 @@ func TestArray(t *testing.T) {
 					I int
 				}
 				arrayOfStruct := [3]s{{I: 1}}
-				copied := Copy(&arrayOfStruct)
+				copied := first(Copy(&arrayOfStruct))
 				assert.NotSame(t, &arrayOfStruct, copied)
 				assert.NotSame(t, arrayOfStruct[0], copied.(*[3]s)[0])
 				arrayOfStruct[0].I = 999
@@ -120,7 +176,7 @@ func TestArray(t *testing.T) {
 					I int
 				}
 				arrayOfPointerStruct := [3]*s{&s{I: 1}}
-				copied := Copy(&arrayOfPointerStruct)
+				copied := first(Copy(&arrayOfPointerStruct))
 				assert.NotSame(t, &arrayOfPointerStruct, copied)
 				assert.NotSame(t, arrayOfPointerStruct[0], copied.(*[3]*s)[0])
 				arrayOfPointerStruct[0].I = 999
@@ -138,7 +194,7 @@ func TestArray(t *testing.T) {
 // just basic is this working stuff
 func TestSimple(t *testing.T) {
 	Strings := []string{"a", "b", "c"}
-	cpyS := Copy(Strings).([]string)
+	cpyS := first(Copy(Strings)).([]string)
 	if (*reflect.SliceHeader)(unsafe.Pointer(&Strings)).Data == (*reflect.SliceHeader)(unsafe.Pointer(&cpyS)).Data {
 		t.Error("[]string: expected SliceHeader data pointers to point to different locations, they didn't")
 		goto CopyBools
@@ -155,7 +211,7 @@ func TestSimple(t *testing.T) {
 
 CopyBools:
 	Bools := []bool{true, true, false, false}
-	cpyB := Copy(Bools).([]bool)
+	cpyB := first(Copy(Bools)).([]bool)
 	if (*reflect.SliceHeader)(unsafe.Pointer(&Strings)).Data == (*reflect.SliceHeader)(unsafe.Pointer(&cpyB)).Data {
 		t.Error("[]bool: expected SliceHeader data pointers to point to different locations, they didn't")
 		goto CopyBytes
@@ -172,7 +228,7 @@ CopyBools:
 
 CopyBytes:
 	Bytes := []byte("hello")
-	cpyBt := Copy(Bytes).([]byte)
+	cpyBt := first(Copy(Bytes)).([]byte)
 	if (*reflect.SliceHeader)(unsafe.Pointer(&Strings)).Data == (*reflect.SliceHeader)(unsafe.Pointer(&cpyBt)).Data {
 		t.Error("[]byte: expected SliceHeader data pointers to point to different locations, they didn't")
 		goto CopyInts
@@ -189,7 +245,7 @@ CopyBytes:
 
 CopyInts:
 	Ints := []int{42}
-	cpyI := Copy(Ints).([]int)
+	cpyI := first(Copy(Ints)).([]int)
 	if (*reflect.SliceHeader)(unsafe.Pointer(&Strings)).Data == (*reflect.SliceHeader)(unsafe.Pointer(&cpyI)).Data {
 		t.Error("[]int: expected SliceHeader data pointers to point to different locations, they didn't")
 		goto CopyUints
@@ -206,7 +262,7 @@ CopyInts:
 
 CopyUints:
 	Uints := []uint{1, 2, 3, 4, 5}
-	cpyU := Copy(Uints).([]uint)
+	cpyU := first(Copy(Uints)).([]uint)
 	if (*reflect.SliceHeader)(unsafe.Pointer(&Strings)).Data == (*reflect.SliceHeader)(unsafe.Pointer(&cpyU)).Data {
 		t.Error("[]: expected SliceHeader data pointers to point to different locations, they didn't")
 		goto CopyFloat32s
@@ -223,7 +279,7 @@ CopyUints:
 
 CopyFloat32s:
 	Float32s := []float32{3.14}
-	cpyF := Copy(Float32s).([]float32)
+	cpyF := first(Copy(Float32s)).([]float32)
 	if (*reflect.SliceHeader)(unsafe.Pointer(&Strings)).Data == (*reflect.SliceHeader)(unsafe.Pointer(&cpyF)).Data {
 		t.Error("[]float32: expected SliceHeader data pointers to point to different locations, they didn't")
 		goto CopyInterfaces
@@ -240,7 +296,7 @@ CopyFloat32s:
 
 CopyInterfaces:
 	Interfaces := []interface{}{"a", 42, true, 4.32}
-	cpyIf := Copy(Interfaces).([]interface{})
+	cpyIf := first(Copy(Interfaces)).([]interface{})
 	if (*reflect.SliceHeader)(unsafe.Pointer(&Strings)).Data == (*reflect.SliceHeader)(unsafe.Pointer(&cpyIf)).Data {
 		t.Error("[]interfaces: expected SliceHeader data pointers to point to different locations, they didn't")
 		return
@@ -337,25 +393,25 @@ func TestMostTypes(t *testing.T) {
 		Complex128s: []complex128{complex128(-128 + 11i), complex128(129 + 10i)},
 		Interfaces:  []interface{}{42, true, "pan-galactic"},
 	}
-
-	cpy := Copy(test).(Basics)
-
+	
+	cpy := first(Copy(test)).(Basics)
+	
 	// see if they point to the same location
 	if fmt.Sprintf("%p", &cpy) == fmt.Sprintf("%p", &test) {
 		t.Error("address of copy was the same as original; they should be different")
 		return
 	}
-
+	
 	// Go through each field and check to see it got copied properly
 	if cpy.String != test.String {
 		t.Errorf("String: got %v; want %v", cpy.String, test.String)
 	}
-
+	
 	if (*reflect.SliceHeader)(unsafe.Pointer(&test.Strings)).Data == (*reflect.SliceHeader)(unsafe.Pointer(&cpy.Strings)).Data {
 		t.Error("Strings: address of copy was the same as original; they should be different")
 		goto StringArr
 	}
-
+	
 	if len(cpy.Strings) != len(test.Strings) {
 		t.Errorf("Strings: len was %d; want %d", len(cpy.Strings), len(test.Strings))
 		goto StringArr
@@ -381,7 +437,7 @@ Bools:
 	if cpy.Bool != test.Bool {
 		t.Errorf("Bool: got %v; want %v", cpy.Bool, test.Bool)
 	}
-
+	
 	if (*reflect.SliceHeader)(unsafe.Pointer(&test.Bools)).Data == (*reflect.SliceHeader)(unsafe.Pointer(&cpy.Bools)).Data {
 		t.Error("Bools: address of copy was the same as original; they should be different")
 		goto Bytes
@@ -400,7 +456,7 @@ Bytes:
 	if cpy.Byte != test.Byte {
 		t.Errorf("Byte: got %v; want %v", cpy.Byte, test.Byte)
 	}
-
+	
 	if (*reflect.SliceHeader)(unsafe.Pointer(&test.Bytes)).Data == (*reflect.SliceHeader)(unsafe.Pointer(&cpy.Bytes)).Data {
 		t.Error("Bytes: address of copy was the same as original; they should be different")
 		goto Ints
@@ -419,7 +475,7 @@ Ints:
 	if cpy.Int != test.Int {
 		t.Errorf("Int: got %v; want %v", cpy.Int, test.Int)
 	}
-
+	
 	if (*reflect.SliceHeader)(unsafe.Pointer(&test.Ints)).Data == (*reflect.SliceHeader)(unsafe.Pointer(&cpy.Ints)).Data {
 		t.Error("Ints: address of copy was the same as original; they should be different")
 		goto Int8s
@@ -438,7 +494,7 @@ Int8s:
 	if cpy.Int8 != test.Int8 {
 		t.Errorf("Int8: got %v; want %v", cpy.Int8, test.Int8)
 	}
-
+	
 	if (*reflect.SliceHeader)(unsafe.Pointer(&test.Int8s)).Data == (*reflect.SliceHeader)(unsafe.Pointer(&cpy.Int8s)).Data {
 		t.Error("Int8s: address of copy was the same as original; they should be different")
 		goto Int16s
@@ -457,7 +513,7 @@ Int16s:
 	if cpy.Int16 != test.Int16 {
 		t.Errorf("Int16: got %v; want %v", cpy.Int16, test.Int16)
 	}
-
+	
 	if (*reflect.SliceHeader)(unsafe.Pointer(&test.Int16s)).Data == (*reflect.SliceHeader)(unsafe.Pointer(&cpy.Int16s)).Data {
 		t.Error("Int16s: address of copy was the same as original; they should be different")
 		goto Int32s
@@ -476,7 +532,7 @@ Int32s:
 	if cpy.Int32 != test.Int32 {
 		t.Errorf("Int32: got %v; want %v", cpy.Int32, test.Int32)
 	}
-
+	
 	if (*reflect.SliceHeader)(unsafe.Pointer(&test.Int32s)).Data == (*reflect.SliceHeader)(unsafe.Pointer(&cpy.Int32s)).Data {
 		t.Error("Int32s: address of copy was the same as original; they should be different")
 		goto Int64s
@@ -495,7 +551,7 @@ Int64s:
 	if cpy.Int64 != test.Int64 {
 		t.Errorf("Int64: got %v; want %v", cpy.Int64, test.Int64)
 	}
-
+	
 	if (*reflect.SliceHeader)(unsafe.Pointer(&test.Int64s)).Data == (*reflect.SliceHeader)(unsafe.Pointer(&cpy.Int64s)).Data {
 		t.Error("Int64s: address of copy was the same as original; they should be different")
 		goto Uints
@@ -514,7 +570,7 @@ Uints:
 	if cpy.Uint != test.Uint {
 		t.Errorf("Uint: got %v; want %v", cpy.Uint, test.Uint)
 	}
-
+	
 	if (*reflect.SliceHeader)(unsafe.Pointer(&test.Uints)).Data == (*reflect.SliceHeader)(unsafe.Pointer(&cpy.Uints)).Data {
 		t.Error("Uints: address of copy was the same as original; they should be different")
 		goto Uint8s
@@ -533,7 +589,7 @@ Uint8s:
 	if cpy.Uint8 != test.Uint8 {
 		t.Errorf("Uint8: got %v; want %v", cpy.Uint8, test.Uint8)
 	}
-
+	
 	if (*reflect.SliceHeader)(unsafe.Pointer(&test.Uint8s)).Data == (*reflect.SliceHeader)(unsafe.Pointer(&cpy.Uint8s)).Data {
 		t.Error("Uint8s: address of copy was the same as original; they should be different")
 		goto Uint16s
@@ -552,7 +608,7 @@ Uint16s:
 	if cpy.Uint16 != test.Uint16 {
 		t.Errorf("Uint16: got %v; want %v", cpy.Uint16, test.Uint16)
 	}
-
+	
 	if (*reflect.SliceHeader)(unsafe.Pointer(&test.Uint16s)).Data == (*reflect.SliceHeader)(unsafe.Pointer(&cpy.Uint16s)).Data {
 		t.Error("Uint16s: address of copy was the same as original; they should be different")
 		goto Uint32s
@@ -571,7 +627,7 @@ Uint32s:
 	if cpy.Uint32 != test.Uint32 {
 		t.Errorf("Uint32: got %v; want %v", cpy.Uint32, test.Uint32)
 	}
-
+	
 	if (*reflect.SliceHeader)(unsafe.Pointer(&test.Uint32s)).Data == (*reflect.SliceHeader)(unsafe.Pointer(&cpy.Uint32s)).Data {
 		t.Error("Uint32s: address of copy was the same as original; they should be different")
 		goto Uint64s
@@ -590,7 +646,7 @@ Uint64s:
 	if cpy.Uint64 != test.Uint64 {
 		t.Errorf("Uint64: got %v; want %v", cpy.Uint64, test.Uint64)
 	}
-
+	
 	if (*reflect.SliceHeader)(unsafe.Pointer(&test.Uint64s)).Data == (*reflect.SliceHeader)(unsafe.Pointer(&cpy.Uint64s)).Data {
 		t.Error("Uint64s: address of copy was the same as original; they should be different")
 		goto Float32s
@@ -609,7 +665,7 @@ Float32s:
 	if cpy.Float32 != test.Float32 {
 		t.Errorf("Float32: got %v; want %v", cpy.Float32, test.Float32)
 	}
-
+	
 	if (*reflect.SliceHeader)(unsafe.Pointer(&test.Float32s)).Data == (*reflect.SliceHeader)(unsafe.Pointer(&cpy.Float32s)).Data {
 		t.Error("Float32s: address of copy was the same as original; they should be different")
 		goto Float64s
@@ -628,7 +684,7 @@ Float64s:
 	if cpy.Float64 != test.Float64 {
 		t.Errorf("Float64: got %v; want %v", cpy.Float64, test.Float64)
 	}
-
+	
 	if (*reflect.SliceHeader)(unsafe.Pointer(&test.Float64s)).Data == (*reflect.SliceHeader)(unsafe.Pointer(&cpy.Float64s)).Data {
 		t.Error("Float64s: address of copy was the same as original; they should be different")
 		goto Complex64s
@@ -647,7 +703,7 @@ Complex64s:
 	if cpy.Complex64 != test.Complex64 {
 		t.Errorf("Complex64: got %v; want %v", cpy.Complex64, test.Complex64)
 	}
-
+	
 	if (*reflect.SliceHeader)(unsafe.Pointer(&test.Complex64s)).Data == (*reflect.SliceHeader)(unsafe.Pointer(&cpy.Complex64s)).Data {
 		t.Error("Complex64s: address of copy was the same as original; they should be different")
 		goto Complex128s
@@ -666,7 +722,7 @@ Complex128s:
 	if cpy.Complex128 != test.Complex128 {
 		t.Errorf("Complex128s: got %v; want %v", cpy.Complex128s, test.Complex128s)
 	}
-
+	
 	if (*reflect.SliceHeader)(unsafe.Pointer(&test.Complex128s)).Data == (*reflect.SliceHeader)(unsafe.Pointer(&cpy.Complex128s)).Data {
 		t.Error("Complex128s: address of copy was the same as original; they should be different")
 		goto Interfaces
@@ -685,7 +741,7 @@ Interfaces:
 	if cpy.Interface != test.Interface {
 		t.Errorf("Interface: got %v; want %v", cpy.Interface, test.Interface)
 	}
-
+	
 	if (*reflect.SliceHeader)(unsafe.Pointer(&test.Interfaces)).Data == (*reflect.SliceHeader)(unsafe.Pointer(&cpy.Interfaces)).Data {
 		t.Error("Interfaces: address of copy was the same as original; they should be different")
 		return
@@ -704,7 +760,7 @@ Interfaces:
 // not meant to be exhaustive
 func TestComplexSlices(t *testing.T) {
 	orig3Int := [][][]int{[][]int{[]int{1, 2, 3}, []int{11, 22, 33}}, [][]int{[]int{7, 8, 9}, []int{66, 77, 88, 99}}}
-	cpyI := Copy(orig3Int).([][][]int)
+	cpyI := first(Copy(orig3Int)).([][][]int)
 	if (*reflect.SliceHeader)(unsafe.Pointer(&orig3Int)).Data == (*reflect.SliceHeader)(unsafe.Pointer(&cpyI)).Data {
 		t.Error("[][][]int: address of copy was the same as original; they should be different")
 		return
@@ -729,12 +785,12 @@ func TestComplexSlices(t *testing.T) {
 				}
 			}
 		}
-
+		
 	}
 
 sliceMap:
 	slMap := []map[int]string{map[int]string{0: "a", 1: "b"}, map[int]string{10: "k", 11: "l", 12: "m"}}
-	cpyM := Copy(slMap).([]map[int]string)
+	cpyM := first(Copy(slMap)).([]map[int]string)
 	if (*reflect.SliceHeader)(unsafe.Pointer(&slMap)).Data == (*reflect.SliceHeader)(unsafe.Pointer(&cpyM)).Data {
 		t.Error("[]map[int]string: address of copy was the same as original; they should be different")
 	}
@@ -794,7 +850,7 @@ var AStruct = A{
 }
 
 func TestStructA(t *testing.T) {
-	cpy := Copy(AStruct).(A)
+	cpy := first(Copy(AStruct)).(A)
 	if &cpy == &AStruct {
 		t.Error("expected copy to have a different address than the original; it was the same")
 		return
@@ -823,7 +879,7 @@ NilSl:
 	if cpy.NilSl != nil {
 		t.Error("A.NilSl: expected slice to be nil, it wasn't")
 	}
-
+	
 	if *(*uintptr)(unsafe.Pointer(&cpy.Map)) == *(*uintptr)(unsafe.Pointer(&AStruct.Map)) {
 		t.Error("A.Map: expected the copy's address to be different; it wasn't")
 		goto AMapB
@@ -879,12 +935,12 @@ ASliceB:
 		t.Error("A.SliceB: expected the copy's address to be different; it wasn't")
 		goto B
 	}
-
+	
 	if len(AStruct.SliceB) != len(cpy.SliceB) {
 		t.Errorf("A.SliceB: got length of %d; want %d", len(cpy.SliceB), len(AStruct.SliceB))
 		goto B
 	}
-
+	
 	for i := range AStruct.SliceB {
 		if unsafe.Pointer(&AStruct.SliceB[i]) == unsafe.Pointer(&cpy.SliceB[i]) {
 			t.Errorf("A.SliceB[%d]: expected them to have different addresses, they didn't", i)
@@ -950,7 +1006,7 @@ func TestUnexportedFields(t *testing.T) {
 		cc: []int{1, 2, 3},
 		dd: map[string]string{"hello": "bonjour"},
 	}
-	cpy := Copy(u).(*Unexported)
+	cpy := first(Copy(u)).(*Unexported)
 	if cpy == u {
 		t.Error("expected addresses to be different, they weren't")
 		return
@@ -996,7 +1052,7 @@ func TestTimeCopy(t *testing.T) {
 		{2015, time.October, 31, 9, 44, 23, 45935, "UTC"},
 		{2014, time.May, 5, 22, 01, 50, 219300, "Europe/Prague"},
 	}
-
+	
 	for i, test := range tests {
 		l, err := time.LoadLocation(test.TZ)
 		if err != nil {
@@ -1005,7 +1061,7 @@ func TestTimeCopy(t *testing.T) {
 		}
 		var x T
 		x.Time = time.Date(test.Y, test.M, test.D, test.h, test.m, test.s, test.nsec, l)
-		c := Copy(x).(T)
+		c := first(Copy(x)).(T)
 		if fmt.Sprintf("%p", &c) == fmt.Sprintf("%p", &x) {
 			t.Errorf("%d: expected the copy to have a different address than the original value; they were the same: %p %p", i, &c, &x)
 			continue
@@ -1024,15 +1080,19 @@ func TestPointerToStruct(t *testing.T) {
 	type Foo struct {
 		Bar int
 	}
-
+	
 	f := &Foo{Bar: 42}
-	cpy := Copy(f)
+	cpy := first(Copy(f))
 	if f == cpy {
 		t.Errorf("expected copy to point to a different location: orig: %p; copy: %p", f, cpy)
 	}
 	if !reflect.DeepEqual(f, cpy) {
 		t.Errorf("expected the copy to be equal to the original (except for memory location); it wasn't: got %#v; want %#v", f, cpy)
 	}
+}
+
+func first(copied interface{}, _ error) interface{} {
+	return copied
 }
 
 func TestIssue9(t *testing.T) {
@@ -1042,7 +1102,7 @@ func TestIssue9(t *testing.T) {
 		"a": nil,
 		"b": &x,
 	}
-	copyA := Copy(testA).(map[string]*int)
+	copyA := first(Copy(testA)).(map[string]*int)
 	if unsafe.Pointer(&testA) == unsafe.Pointer(&copyA) {
 		t.Fatalf("expected the map pointers to be different: testA: %v\tcopyA: %v", unsafe.Pointer(&testA), unsafe.Pointer(&copyA))
 	}
@@ -1052,22 +1112,22 @@ func TestIssue9(t *testing.T) {
 	if testA["b"] == copyA["b"] {
 		t.Errorf("entries for 'b' pointed to the same address: %v; expected them to point to different addresses", testA["b"])
 	}
-
+	
 	// map copy
 	type Foo struct {
 		Alpha string
 	}
-
+	
 	type Bar struct {
 		Beta  string
 		Gamma int
 		Delta *Foo
 	}
-
+	
 	type Biz struct {
 		Epsilon map[int]*Bar
 	}
-
+	
 	testB := Biz{
 		Epsilon: map[int]*Bar{
 			0: &Bar{},
@@ -1085,18 +1145,18 @@ func TestIssue9(t *testing.T) {
 			},
 		},
 	}
-
-	copyB := Copy(testB).(Biz)
+	
+	copyB := first(Copy(testB)).(Biz)
 	if !reflect.DeepEqual(testB, copyB) {
 		t.Errorf("got %#v; want %#v", copyB, testB)
 		return
 	}
-
+	
 	// check that the maps point to different locations
 	if unsafe.Pointer(&testB.Epsilon) == unsafe.Pointer(&copyB.Epsilon) {
 		t.Fatalf("expected the map pointers to be different; they weren't: testB: %v\tcopyB: %v", unsafe.Pointer(&testB.Epsilon), unsafe.Pointer(&copyB.Epsilon))
 	}
-
+	
 	for k, v := range testB.Epsilon {
 		if v == nil && copyB.Epsilon[k] == nil {
 			continue
@@ -1129,7 +1189,7 @@ func TestIssue9(t *testing.T) {
 			t.Errorf("%d.Delta.Foo: got %q; want %q", k, v.Delta.Alpha, copyB.Epsilon[k].Delta.Alpha)
 		}
 	}
-
+	
 	// test that map keys are deep copied
 	testC := map[*Foo][]string{
 		&Foo{Alpha: "Henry Dorsett Case"}: []string{
@@ -1141,18 +1201,18 @@ func TestIssue9(t *testing.T) {
 			"Steppin' Razor",
 		},
 	}
-
-	copyC := Copy(testC).(map[*Foo][]string)
+	
+	copyC := first(Copy(testC)).(map[*Foo][]string)
 	if unsafe.Pointer(&testC) == unsafe.Pointer(&copyC) {
 		t.Fatalf("expected the map pointers to be different; they weren't: testB: %v\tcopyB: %v", unsafe.Pointer(&testB.Epsilon), unsafe.Pointer(&copyB.Epsilon))
 	}
-
+	
 	// make sure the lengths are the same
 	if len(testC) != len(copyC) {
 		t.Fatalf("got len %d; want %d", len(copyC), len(testC))
 	}
-
-	// check that everything was deep copied: since the key is a pointer, we check to
+	
+	// check that everything was deep copied: since the key is a Pointer, we check to
 	// see if the pointers are different but the values being pointed to are the same.
 	for k, v := range testC {
 		for kk, vv := range copyC {
@@ -1164,7 +1224,7 @@ func TestIssue9(t *testing.T) {
 				if !reflect.DeepEqual(v, vv) {
 					t.Errorf("expected slice contents to be the same; they weren't: orig: %v; copy: %v", v, vv)
 				}
-
+				
 				if (*reflect.SliceHeader)(unsafe.Pointer(&v)).Data == (*reflect.SliceHeader)(unsafe.Pointer(&vv)).Data {
 					t.Errorf("expected the SliceHeaders.Data to point to different locations; they didn't: %v", (*reflect.SliceHeader)(unsafe.Pointer(&v)).Data)
 				}
@@ -1172,20 +1232,20 @@ func TestIssue9(t *testing.T) {
 			}
 		}
 	}
-
+	
 	type Bizz struct {
 		*Foo
 	}
-
+	
 	testD := map[Bizz]string{
 		Bizz{&Foo{"Neuromancer"}}: "Rio",
 		Bizz{&Foo{"Wintermute"}}:  "Berne",
 	}
-	copyD := Copy(testD).(map[Bizz]string)
+	copyD := first(Copy(testD)).(map[Bizz]string)
 	if len(copyD) != len(testD) {
 		t.Fatalf("copy had %d elements; expected %d", len(copyD), len(testD))
 	}
-
+	
 	for k, v := range testD {
 		var found bool
 		for kk, vv := range copyD {
@@ -1224,13 +1284,16 @@ type NestI struct {
 
 func TestInterface(t *testing.T) {
 	i := &I{A: "A"}
-	copied := Copy(i).(*I)
+	
+	copied := first(Copy(i)).(*I)
+	
 	if copied.A != "custom copy" {
 		t.Errorf("expected value %v, but it's %v", "custom copy", copied.A)
 	}
 	// check for nesting values
 	ni := &NestI{I: &I{A: "A"}}
-	copiedNest := Copy(ni).(*NestI)
+	
+	copiedNest := first(Copy(ni)).(*NestI)
 	if copiedNest.I.A != "custom copy" {
 		t.Errorf("expected value %v, but it's %v", "custom copy", copiedNest.I.A)
 	}
