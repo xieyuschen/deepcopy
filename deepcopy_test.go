@@ -6,7 +6,134 @@ import (
 	"testing"
 	"time"
 	"unsafe"
+
+	"github.com/stretchr/testify/assert"
 )
+
+func TestArray(t *testing.T) {
+	verifyCases := map[string]struct {
+		modifyAndVerify func(t *testing.T)
+	}{
+		"array of map": {
+			modifyAndVerify: func(t *testing.T) {
+				origin := [1]map[string]int{
+					{
+						"1": 1,
+					},
+				}
+				copied := Copy(&origin)
+				assert.NotSame(t, origin, copied)
+				assert.NotSame(t, origin[0], copied.(*[1]map[string]int)[0])
+				origin[0]["1"] = 999
+				if 1 != copied.(*[1]map[string]int)[0]["1"] {
+					t.Fatalf("fail to do deep copy")
+				}
+			},
+		},
+		"array of *map": {
+			modifyAndVerify: func(t *testing.T) {
+				origin := [1]*map[string]int{
+					{
+						"1": 1,
+					},
+				}
+				copied := Copy(&origin)
+				assert.NotSame(t, origin, copied)
+				assert.NotSame(t, origin[0], copied.(*[1]*map[string]int)[0])
+				(*origin[0])["1"] = 999
+				if 1 != (*copied.(*[1]*map[string]int)[0])["1"] {
+					t.Fatalf("fail to do deep copy")
+				}
+			},
+		},
+		"array of *int": {
+			modifyAndVerify: func(t *testing.T) {
+				intp := func(i int) *int {
+					return &i
+				}
+				arrayOfInt := [3]*int{intp(1), intp(2)}
+				copied := Copy(&arrayOfInt)
+				assert.NotSame(t, &arrayOfInt, copied)
+				assert.NotSame(t, arrayOfInt[0], copied.(*[3]*int)[0])
+				arrayOfInt[0] = intp(999)
+				if 1 != *copied.(*[3]*int)[0] {
+					t.Fatalf("fail to do deep copy")
+				}
+			},
+		},
+		"array of int": {
+			modifyAndVerify: func(t *testing.T) {
+				arrayOfInt := [3]int{1, 2}
+				copied := Copy(&arrayOfInt)
+				assert.NotSame(t, &arrayOfInt, copied)
+				assert.NotSame(t, &arrayOfInt[0], copied.(*[3]int)[0])
+				arrayOfInt[0] = 999
+				if 1 != (*copied.(*[3]int))[0] {
+					t.Fatalf("fail to do deep copy")
+				}
+			},
+		},
+		"array of slice": {
+			modifyAndVerify: func(t *testing.T) {
+				arraySlice := [3][]int{{1, 2}}
+				copied := Copy(&arraySlice)
+				assert.NotSame(t, &arraySlice, copied)
+				assert.NotSame(t, &arraySlice[0], copied.(*[3][]int)[0])
+				assert.NotSame(t, &arraySlice[0][0], copied.(*[3][]int)[0][0])
+				arraySlice[0][0] = 999
+				if 1 != (*copied.(*[3][]int))[0][0] {
+					t.Fatalf("fail to do deep copy")
+				}
+			},
+		},
+		"array of *slice": {
+			modifyAndVerify: func(t *testing.T) {
+				PointerSlice := [3]*[]int{{1, 2}}
+				copied := Copy(&PointerSlice)
+				assert.NotSame(t, &PointerSlice, copied)
+				assert.NotSame(t, PointerSlice[0], copied.(*[3]*[]int)[0])
+				assert.NotSame(t, &(*PointerSlice[0])[0], &(*copied.(*[3]*[]int)[0])[0])
+				(*PointerSlice[0])[0] = 999
+				if 1 != (*(copied.(*[3]*[]int))[0])[0] {
+					t.Fatalf("fail to do deep copy")
+				}
+			},
+		},
+		"array of struct": {
+			modifyAndVerify: func(t *testing.T) {
+				type s struct {
+					I int
+				}
+				arrayOfStruct := [3]s{{I: 1}}
+				copied := Copy(&arrayOfStruct)
+				assert.NotSame(t, &arrayOfStruct, copied)
+				assert.NotSame(t, arrayOfStruct[0], copied.(*[3]s)[0])
+				arrayOfStruct[0].I = 999
+				if 1 != copied.(*[3]s)[0].I {
+					t.Fatalf("fail to do deep copy")
+				}
+			},
+		},
+		"array of *struct": {
+			modifyAndVerify: func(t *testing.T) {
+				type s struct {
+					I int
+				}
+				arrayOfPointerStruct := [3]*s{&s{I: 1}}
+				copied := Copy(&arrayOfPointerStruct)
+				assert.NotSame(t, &arrayOfPointerStruct, copied)
+				assert.NotSame(t, arrayOfPointerStruct[0], copied.(*[3]*s)[0])
+				arrayOfPointerStruct[0].I = 999
+				if 1 != copied.(*[3]*s)[0].I {
+					t.Fatalf("fail to do deep copy")
+				}
+			},
+		},
+	}
+	for key, tt := range verifyCases {
+		t.Run(key, tt.modifyAndVerify)
+	}
+}
 
 // just basic is this working stuff
 func TestSimple(t *testing.T) {

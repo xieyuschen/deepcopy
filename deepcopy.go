@@ -59,7 +59,7 @@ func copyRecursive(original, cpy reflect.Value) {
 		// Get the actual value being pointed to.
 		originalValue := original.Elem()
 
-		// if  it isn't valid, return.
+		// if it isn't valid, return.
 		if !originalValue.IsValid() {
 			return
 		}
@@ -100,12 +100,18 @@ func copyRecursive(original, cpy reflect.Value) {
 		if original.IsNil() {
 			return
 		}
+
 		// Make a new slice and copy each element.
 		cpy.Set(reflect.MakeSlice(original.Type(), original.Len(), original.Cap()))
 		for i := 0; i < original.Len(); i++ {
 			copyRecursive(original.Index(i), cpy.Index(i))
 		}
-
+	case reflect.Array:
+		// since origin is an array, the capacity of array will be conserved
+		cpy.Set(reflect.New(original.Type()).Elem())
+		for i := 0; i < original.Len(); i++ {
+			copyRecursive(original.Index(i), cpy.Index(i))
+		}
 	case reflect.Map:
 		if original.IsNil() {
 			return
