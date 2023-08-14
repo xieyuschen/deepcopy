@@ -15,6 +15,19 @@ type ref struct {
 	Pointer *ref
 }
 
+func TestExcessiveReferenceChain(t *testing.T) {
+	type demo struct {
+		Pointer *demo
+	}
+	length := 3000
+	ar := make([]demo, length)
+	for i := 0; i < length-1; i++ {
+		ar[i].Pointer = &ar[i+1]
+	}
+	_, err := Copy(ar)
+	assert.True(t, strings.Contains(err.Error(), "excessive reference chain happened via"))
+}
+
 func TestCircularReference(t *testing.T) {
 	testCases := map[string]struct {
 		fn func() error
@@ -47,10 +60,22 @@ func TestCircularReference(t *testing.T) {
 			_, err := Copy(sliceCycle)
 			return err
 		}},
+		"circular array": {fn: func() error {
+			sliceCycle := [1][]interface{}{[]interface{}{nil}}
+			sliceCycle[0][0] = sliceCycle
+			_, err := Copy(sliceCycle)
+			return err
+		}},
 		"circular map": {fn: func() error {
 			mapCycle := make(map[string]interface{})
 			mapCycle["x"] = mapCycle
 			_, err := Copy(mapCycle)
+			return err
+		}},
+		"circular map in key": {fn: func() error {
+			mapCycle := make(map[interface{}]string)
+			mapCycle[&mapCycle] = "x"
+			_, err := Copy(&mapCycle)
 			return err
 		}},
 	}
@@ -191,6 +216,17 @@ func TestArray(t *testing.T) {
 	}
 }
 
+func TestNil(t *testing.T) {
+	val, err := Copy(nil)
+	assert.NoError(t, err)
+	assert.Nil(t, val)
+	
+	var m map[string]struct{} = nil
+	val, err = Copy(m)
+	assert.NoError(t, err)
+	assert.Nil(t, val)
+}
+
 // just basic is this working stuff
 func TestSimple(t *testing.T) {
 	Strings := []string{"a", "b", "c"}
@@ -200,7 +236,7 @@ func TestSimple(t *testing.T) {
 		goto CopyBools
 	}
 	if len(cpyS) != len(Strings) {
-		t.Errorf("[]string: len was %d; want %d", len(cpyS), len(Strings))
+		t.Errorf("[]string: length was %d; want %d", len(cpyS), len(Strings))
 		goto CopyBools
 	}
 	for i, v := range Strings {
@@ -217,7 +253,7 @@ CopyBools:
 		goto CopyBytes
 	}
 	if len(cpyB) != len(Bools) {
-		t.Errorf("[]bool: len was %d; want %d", len(cpyB), len(Bools))
+		t.Errorf("[]bool: length was %d; want %d", len(cpyB), len(Bools))
 		goto CopyBytes
 	}
 	for i, v := range Bools {
@@ -234,7 +270,7 @@ CopyBytes:
 		goto CopyInts
 	}
 	if len(cpyBt) != len(Bytes) {
-		t.Errorf("[]byte: len was %d; want %d", len(cpyBt), len(Bytes))
+		t.Errorf("[]byte: length was %d; want %d", len(cpyBt), len(Bytes))
 		goto CopyInts
 	}
 	for i, v := range Bytes {
@@ -251,7 +287,7 @@ CopyInts:
 		goto CopyUints
 	}
 	if len(cpyI) != len(Ints) {
-		t.Errorf("[]int: len was %d; want %d", len(cpyI), len(Ints))
+		t.Errorf("[]int: length was %d; want %d", len(cpyI), len(Ints))
 		goto CopyUints
 	}
 	for i, v := range Ints {
@@ -268,7 +304,7 @@ CopyUints:
 		goto CopyFloat32s
 	}
 	if len(cpyU) != len(Uints) {
-		t.Errorf("[]uint: len was %d; want %d", len(cpyU), len(Uints))
+		t.Errorf("[]uint: length was %d; want %d", len(cpyU), len(Uints))
 		goto CopyFloat32s
 	}
 	for i, v := range Uints {
@@ -285,7 +321,7 @@ CopyFloat32s:
 		goto CopyInterfaces
 	}
 	if len(cpyF) != len(Float32s) {
-		t.Errorf("[]float32: len was %d; want %d", len(cpyF), len(Float32s))
+		t.Errorf("[]float32: length was %d; want %d", len(cpyF), len(Float32s))
 		goto CopyInterfaces
 	}
 	for i, v := range Float32s {
@@ -302,7 +338,7 @@ CopyInterfaces:
 		return
 	}
 	if len(cpyIf) != len(Interfaces) {
-		t.Errorf("[]interface{}: len was %d; want %d", len(cpyIf), len(Interfaces))
+		t.Errorf("[]interface{}: length was %d; want %d", len(cpyIf), len(Interfaces))
 		return
 	}
 	for i, v := range Interfaces {
@@ -413,7 +449,7 @@ func TestMostTypes(t *testing.T) {
 	}
 	
 	if len(cpy.Strings) != len(test.Strings) {
-		t.Errorf("Strings: len was %d; want %d", len(cpy.Strings), len(test.Strings))
+		t.Errorf("Strings: length was %d; want %d", len(cpy.Strings), len(test.Strings))
 		goto StringArr
 	}
 	for i, v := range test.Strings {
@@ -443,7 +479,7 @@ Bools:
 		goto Bytes
 	}
 	if len(cpy.Bools) != len(test.Bools) {
-		t.Errorf("Bools: len was %d; want %d", len(cpy.Bools), len(test.Bools))
+		t.Errorf("Bools: length was %d; want %d", len(cpy.Bools), len(test.Bools))
 		goto Bytes
 	}
 	for i, v := range test.Bools {
@@ -462,7 +498,7 @@ Bytes:
 		goto Ints
 	}
 	if len(cpy.Bytes) != len(test.Bytes) {
-		t.Errorf("Bytes: len was %d; want %d", len(cpy.Bytes), len(test.Bytes))
+		t.Errorf("Bytes: length was %d; want %d", len(cpy.Bytes), len(test.Bytes))
 		goto Ints
 	}
 	for i, v := range test.Bytes {
@@ -481,7 +517,7 @@ Ints:
 		goto Int8s
 	}
 	if len(cpy.Ints) != len(test.Ints) {
-		t.Errorf("Ints: len was %d; want %d", len(cpy.Ints), len(test.Ints))
+		t.Errorf("Ints: length was %d; want %d", len(cpy.Ints), len(test.Ints))
 		goto Int8s
 	}
 	for i, v := range test.Ints {
@@ -500,7 +536,7 @@ Int8s:
 		goto Int16s
 	}
 	if len(cpy.Int8s) != len(test.Int8s) {
-		t.Errorf("Int8s: len was %d; want %d", len(cpy.Int8s), len(test.Int8s))
+		t.Errorf("Int8s: length was %d; want %d", len(cpy.Int8s), len(test.Int8s))
 		goto Int16s
 	}
 	for i, v := range test.Int8s {
@@ -519,7 +555,7 @@ Int16s:
 		goto Int32s
 	}
 	if len(cpy.Int16s) != len(test.Int16s) {
-		t.Errorf("Int16s: len was %d; want %d", len(cpy.Int16s), len(test.Int16s))
+		t.Errorf("Int16s: length was %d; want %d", len(cpy.Int16s), len(test.Int16s))
 		goto Int32s
 	}
 	for i, v := range test.Int16s {
@@ -538,7 +574,7 @@ Int32s:
 		goto Int64s
 	}
 	if len(cpy.Int32s) != len(test.Int32s) {
-		t.Errorf("Int32s: len was %d; want %d", len(cpy.Int32s), len(test.Int32s))
+		t.Errorf("Int32s: length was %d; want %d", len(cpy.Int32s), len(test.Int32s))
 		goto Int64s
 	}
 	for i, v := range test.Int32s {
@@ -557,7 +593,7 @@ Int64s:
 		goto Uints
 	}
 	if len(cpy.Int64s) != len(test.Int64s) {
-		t.Errorf("Int64s: len was %d; want %d", len(cpy.Int64s), len(test.Int64s))
+		t.Errorf("Int64s: length was %d; want %d", len(cpy.Int64s), len(test.Int64s))
 		goto Uints
 	}
 	for i, v := range test.Int64s {
@@ -576,7 +612,7 @@ Uints:
 		goto Uint8s
 	}
 	if len(cpy.Uints) != len(test.Uints) {
-		t.Errorf("Uints: len was %d; want %d", len(cpy.Uints), len(test.Uints))
+		t.Errorf("Uints: length was %d; want %d", len(cpy.Uints), len(test.Uints))
 		goto Uint8s
 	}
 	for i, v := range test.Uints {
@@ -595,7 +631,7 @@ Uint8s:
 		goto Uint16s
 	}
 	if len(cpy.Uint8s) != len(test.Uint8s) {
-		t.Errorf("Uint8s: len was %d; want %d", len(cpy.Uint8s), len(test.Uint8s))
+		t.Errorf("Uint8s: length was %d; want %d", len(cpy.Uint8s), len(test.Uint8s))
 		goto Uint16s
 	}
 	for i, v := range test.Uint8s {
@@ -614,7 +650,7 @@ Uint16s:
 		goto Uint32s
 	}
 	if len(cpy.Uint16s) != len(test.Uint16s) {
-		t.Errorf("Uint16s: len was %d; want %d", len(cpy.Uint16s), len(test.Uint16s))
+		t.Errorf("Uint16s: length was %d; want %d", len(cpy.Uint16s), len(test.Uint16s))
 		goto Uint32s
 	}
 	for i, v := range test.Uint16s {
@@ -633,7 +669,7 @@ Uint32s:
 		goto Uint64s
 	}
 	if len(cpy.Uint32s) != len(test.Uint32s) {
-		t.Errorf("Uint32s: len was %d; want %d", len(cpy.Uint32s), len(test.Uint32s))
+		t.Errorf("Uint32s: length was %d; want %d", len(cpy.Uint32s), len(test.Uint32s))
 		goto Uint64s
 	}
 	for i, v := range test.Uint32s {
@@ -652,7 +688,7 @@ Uint64s:
 		goto Float32s
 	}
 	if len(cpy.Uint64s) != len(test.Uint64s) {
-		t.Errorf("Uint64s: len was %d; want %d", len(cpy.Uint64s), len(test.Uint64s))
+		t.Errorf("Uint64s: length was %d; want %d", len(cpy.Uint64s), len(test.Uint64s))
 		goto Float32s
 	}
 	for i, v := range test.Uint64s {
@@ -671,7 +707,7 @@ Float32s:
 		goto Float64s
 	}
 	if len(cpy.Float32s) != len(test.Float32s) {
-		t.Errorf("Float32s: len was %d; want %d", len(cpy.Float32s), len(test.Float32s))
+		t.Errorf("Float32s: length was %d; want %d", len(cpy.Float32s), len(test.Float32s))
 		goto Float64s
 	}
 	for i, v := range test.Float32s {
@@ -690,7 +726,7 @@ Float64s:
 		goto Complex64s
 	}
 	if len(cpy.Float64s) != len(test.Float64s) {
-		t.Errorf("Float64s: len was %d; want %d", len(cpy.Float64s), len(test.Float64s))
+		t.Errorf("Float64s: length was %d; want %d", len(cpy.Float64s), len(test.Float64s))
 		goto Complex64s
 	}
 	for i, v := range test.Float64s {
@@ -709,7 +745,7 @@ Complex64s:
 		goto Complex128s
 	}
 	if len(cpy.Complex64s) != len(test.Complex64s) {
-		t.Errorf("Complex64s: len was %d; want %d", len(cpy.Complex64s), len(test.Complex64s))
+		t.Errorf("Complex64s: length was %d; want %d", len(cpy.Complex64s), len(test.Complex64s))
 		goto Complex128s
 	}
 	for i, v := range test.Complex64s {
@@ -728,7 +764,7 @@ Complex128s:
 		goto Interfaces
 	}
 	if len(cpy.Complex128s) != len(test.Complex128s) {
-		t.Errorf("Complex128s: len was %d; want %d", len(cpy.Complex128s), len(test.Complex128s))
+		t.Errorf("Complex128s: length was %d; want %d", len(cpy.Complex128s), len(test.Complex128s))
 		goto Interfaces
 	}
 	for i, v := range test.Complex128s {
@@ -747,7 +783,7 @@ Interfaces:
 		return
 	}
 	if len(cpy.Interfaces) != len(test.Interfaces) {
-		t.Errorf("Interfaces: len was %d; want %d", len(cpy.Interfaces), len(test.Interfaces))
+		t.Errorf("Interfaces: length was %d; want %d", len(cpy.Interfaces), len(test.Interfaces))
 		return
 	}
 	for i, v := range test.Interfaces {
@@ -766,17 +802,17 @@ func TestComplexSlices(t *testing.T) {
 		return
 	}
 	if len(orig3Int) != len(cpyI) {
-		t.Errorf("[][][]int: len of copy was %d; want %d", len(cpyI), len(orig3Int))
+		t.Errorf("[][][]int: length of copy was %d; want %d", len(cpyI), len(orig3Int))
 		goto sliceMap
 	}
 	for i, v := range orig3Int {
 		if len(v) != len(cpyI[i]) {
-			t.Errorf("[][][]int: len of element %d was %d; want %d", i, len(cpyI[i]), len(v))
+			t.Errorf("[][][]int: length of element %d was %d; want %d", i, len(cpyI[i]), len(v))
 			continue
 		}
 		for j, vv := range v {
 			if len(vv) != len(cpyI[i][j]) {
-				t.Errorf("[][][]int: len of element %d:%d was %d, want %d", i, j, len(cpyI[i][j]), len(vv))
+				t.Errorf("[][][]int: length of element %d:%d was %d, want %d", i, j, len(cpyI[i][j]), len(vv))
 				continue
 			}
 			for k, vvv := range vv {
@@ -795,12 +831,12 @@ sliceMap:
 		t.Error("[]map[int]string: address of copy was the same as original; they should be different")
 	}
 	if len(slMap) != len(cpyM) {
-		t.Errorf("[]map[int]string: len of copy was %d; want %d", len(cpyM), len(slMap))
+		t.Errorf("[]map[int]string: length of copy was %d; want %d", len(cpyM), len(slMap))
 		goto done
 	}
 	for i, v := range slMap {
 		if len(v) != len(cpyM[i]) {
-			t.Errorf("[]map[int]string: len of element %d was %d; want %d", i, len(cpyM[i]), len(v))
+			t.Errorf("[]map[int]string: length of element %d was %d; want %d", i, len(cpyM[i]), len(v))
 			continue
 		}
 		for k, vv := range v {
@@ -866,7 +902,7 @@ func TestStructA(t *testing.T) {
 		goto NilSl
 	}
 	if len(cpy.UintSl) != len(AStruct.UintSl) {
-		t.Errorf("A.UintSl: got len of %d, want %d", len(cpy.UintSl), len(AStruct.UintSl))
+		t.Errorf("A.UintSl: got length of %d, want %d", len(cpy.UintSl), len(AStruct.UintSl))
 		goto NilSl
 	}
 	for i, v := range AStruct.UintSl {
@@ -885,7 +921,7 @@ NilSl:
 		goto AMapB
 	}
 	if len(cpy.Map) != len(AStruct.Map) {
-		t.Errorf("A.Map: got len of %d, want %d", len(cpy.Map), len(AStruct.Map))
+		t.Errorf("A.Map: got length of %d, want %d", len(cpy.Map), len(AStruct.Map))
 		goto AMapB
 	}
 	for k, v := range AStruct.Map {
@@ -905,7 +941,7 @@ AMapB:
 		goto ASliceB
 	}
 	if len(cpy.MapB) != len(AStruct.MapB) {
-		t.Errorf("A.MapB: got len of %d, want %d", len(cpy.MapB), len(AStruct.MapB))
+		t.Errorf("A.MapB: got length of %d, want %d", len(cpy.MapB), len(AStruct.MapB))
 		goto ASliceB
 	}
 	for k, v := range AStruct.MapB {
@@ -1209,7 +1245,7 @@ func TestIssue9(t *testing.T) {
 	
 	// make sure the lengths are the same
 	if len(testC) != len(copyC) {
-		t.Fatalf("got len %d; want %d", len(copyC), len(testC))
+		t.Fatalf("got length %d; want %d", len(copyC), len(testC))
 	}
 	
 	// check that everything was deep copied: since the key is a Pointer, we check to
