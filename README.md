@@ -1,6 +1,7 @@
 # DeepCopy
 
 ![example workflow](https://github.com/xieyuschen/deepcopy/actions/workflows/go.yml/badge.svg)
+[![codecov](https://codecov.io/gh/xieyuschen/deepcopy/branch/master/graph/badge.svg?token=E1IU1FAK92)](https://codecov.io/gh/xieyuschen/deepcopy)
 
 The repo is original at [mohae/deepcopy](github.com/mohae/deepcopy). As it hasn't been maintained for a long time, it's
 maintained here with bug fix and new features.

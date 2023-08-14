@@ -2,20 +2,20 @@ name: Go
 
 on:
   push:
-    branches: [ "**" ]
+    branches: ["**"]
   pull_request:
     branches: [ "master" ]
 
 jobs:
-  test:
-    name: Test
+  push-test:
+    name: push-test
+    if: github.event_name == 'push' && github.event_name != 'pull_request'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        go: [ "1.14.15","1.15.15","1.16.15","1.17.13","1.18.10","1.19.6" ]
-
+        go: [ "1.19.6" ]
     steps:
       - uses: actions/checkout@v3
       - name: Setup Go
@@ -23,8 +23,37 @@ jobs:
         with:
           go-version: ${{ matrix.go }}
       - name: test
-        run: go test -race -v ./...
+        run: go test -race -v -coverprofile=coverage.txt -covermode=atomic ./...
         if: runner.os != 'Windows'
-      - name: Test on windows
+      - name: test on windows
         run: go test -v ./...
         if: runner.os == 'Windows'
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v3
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+  pr-test:
+    name: pr-test
+    if: github.event_name == 'pull_request'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        go: [ "1.14.15","1.15.15","1.16.15","1.17.13","1.18.10","1.19.6" ]
+    steps:
+      - uses: actions/checkout@v3
+      - name: Setup Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ matrix.go }}
+      - name: test
+        run: go test -race -v -coverprofile=coverage.txt -covermode=atomic ./...
+        if: runner.os != 'Windows'
+      - name: test on windows
+        run: go test -v ./...
+        if: runner.os == 'Windows'
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v3
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
